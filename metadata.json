@@ -1,0 +1,6 @@
+{
+  "name": "Nexa AI",
+  "description": "Nexa AI - Personal AI assistant with intelligent memory, security suite, system monitor, and free AI brain.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
