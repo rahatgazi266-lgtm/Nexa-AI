@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Git tag to attach the APK to (e.g. v2.0.0)'
+        description: 'Existing GitHub Release tag (leave blank to upload artifact only)'
         required: false
-        default: 'v2.0.0'
+        default: ''
   push:
     tags:
       - 'v*'
@@ -18,6 +18,7 @@ jobs:
   build-release:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -30,11 +31,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Accept Android SDK licenses and install platform
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
 
       - name: Decode upload keystore
         env:
@@ -73,20 +76,38 @@ jobs:
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK" || { echo 'Release APK missing'; exit 1; }
+
           APKANALYZER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer"
-          if [ ! -x "$APKANALYZER" ]; then APKANALYZER="$(find "$ANDROID_SDK_ROOT" -name apkanalyzer -type f | head -1)"; fi
-          ACTUAL_PACKAGE="$($APKANALYZER manifest application-id "$APK")"
-          [ "$ACTUAL_PACKAGE" = "$EXPECTED_PACKAGE_ID" ] || { echo "Package ID mismatch: $ACTUAL_PACKAGE"; exit 1; }
+          if [ ! -x "$APKANALYZER" ]; then
+            APKANALYZER="$(find "$ANDROID_SDK_ROOT" -name apkanalyzer -type f | head -1)"
+          fi
+
+          ACTUAL_PACKAGE="$("$APKANALYZER" manifest application-id "$APK")"
+          [ "$ACTUAL_PACKAGE" = "$EXPECTED_PACKAGE_ID" ] || {
+            echo "Package ID mismatch: $ACTUAL_PACKAGE"
+            exit 1
+          }
+
           APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature.txt"
+
           ACTUAL_CERT="$(sed -n 's/.*Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature.txt" | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
-          test -n "$ACTUAL_CERT" || { echo 'Could not read APK signing certificate'; exit 1; }
+
+          test -n "$ACTUAL_CERT" || {
+            echo 'Could not read APK signing certificate'
+            exit 1
+          }
+
           if [ -n "$EXPECTED_CERT_SHA256" ]; then
             EXPECTED_CERT="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
-            [ "$ACTUAL_CERT" = "$EXPECTED_CERT" ] || { echo 'Signing certificate SHA-256 mismatch'; exit 1; }
+            [ "$ACTUAL_CERT" = "$EXPECTED_CERT" ] || {
+              echo 'Signing certificate SHA-256 mismatch'
+              exit 1
+            }
           else
-            echo 'EXPECTED_CERT_SHA256 is not set. APK signature is structurally verified, but certificate pinning comparison is skipped.'
+            echo 'EXPECTED_CERT_SHA256 is not set. Certificate comparison skipped.'
           fi
+
           sha256sum "$APK" | tee "$RUNNER_TEMP/apk-sha256.txt"
 
       - name: Upload signed APK artifact
