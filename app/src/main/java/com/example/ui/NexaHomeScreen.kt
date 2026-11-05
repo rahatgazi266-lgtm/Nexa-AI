@@ -393,6 +393,22 @@ fun NexaHomeScreen(
                     )
 
                     DrawerItem(
+                        icon = Icons.Filled.Notifications,
+                        label = "Test Notification",
+                        iconTint = NexaNeonGreen,
+                        onClick = {
+                            viewModel.addNotification(
+                                title = "Nexa AI Test Notification",
+                                message = "Your notification system is working.",
+                                category = "test",
+                                dedupeKey = "test:${System.currentTimeMillis()}",
+                                showSystemNotification = true
+                            )
+                            coroutineScope.launch { drawerState.close() }
+                        }
+                    )
+
+                    DrawerItem(
                         icon = Icons.Outlined.Settings,
                         label = "Settings & API Key",
                         onClick = {
