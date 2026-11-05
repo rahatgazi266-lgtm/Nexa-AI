@@ -29,7 +29,7 @@ class UpdateManager(private val context: Context) {
         const val GITHUB_OWNER = "rahatgazi266-lgtm"
         const val REPOSITORY_NAME = "Nexa-AI"
         const val RELEASES_API_URL = "https://api.github.com/repos/rahatgazi266-lgtm/Nexa-AI/releases/latest"
-        const val DEFAULT_APK_DOWNLOAD_URL = "https://github.com/rahatgazi266-lgtm/Nexa-AI/releases/latest/download/Nexa-AI.apk"
+        const val DEFAULT_APK_DOWNLOAD_URL = "https://github.com/rahatgazi266-lgtm/Nexa-AI/releases/latest/download/app-release.apk"
     }
 
     private val prefs: SharedPreferences =
@@ -110,7 +110,7 @@ class UpdateManager(private val context: Context) {
                 downloadUrl = if (repo.equals(DEFAULT_REPO, ignoreCase = true)) {
                     DEFAULT_APK_DOWNLOAD_URL
                 } else {
-                    "https://github.com/$repo/releases/latest/download/Nexa-AI.apk"
+                    "https://github.com/$repo/releases/latest/download/app-release.apk"
                 }
             }
 

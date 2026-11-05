@@ -14,15 +14,21 @@ import com.example.service.MemoryVaultService
 import com.example.service.NexaBrainService
 import com.example.service.SecurityScannerService
 import com.example.service.UpdateManager
+import com.example.service.NexaNotificationHelper
 import com.example.service.UserDataBackupService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import com.example.data.NexaNotification
+import com.example.data.NexaNotificationRepository
+import com.example.data.NexaNotificationDatabase
 
 enum class DialogType {
-    SETTINGS, SECURITY, MEMORY_VAULT, RECENT_CHATS, ABOUT, UPDATE, BACKUP_RESTORE
+    SETTINGS, SECURITY, MEMORY_VAULT, RECENT_CHATS, ABOUT, UPDATE, BACKUP_RESTORE, NOTIFICATIONS
 }
 
 class NexaViewModel(application: Application) : AndroidViewModel(application) {
@@ -31,6 +37,10 @@ class NexaViewModel(application: Application) : AndroidViewModel(application) {
     private val sessionService = ChatSessionService(application)
     private val updateManager = UpdateManager(application)
     private val backupService = UserDataBackupService(application)
+    private val notificationDao = NexaNotificationDatabase.getDatabase(application).notificationDao()
+    private val notificationRepository = NexaNotificationRepository(notificationDao)
+    val notifications = notificationRepository.notifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val unreadNotificationCount = notificationRepository.unreadCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -68,6 +78,7 @@ class NexaViewModel(application: Application) : AndroidViewModel(application) {
                 when (state) {
                     is UpdateState.Available -> {
                         openDialog(DialogType.UPDATE)
+                        addNotification("Nexa AI update available", "Version ${state.updateInfo.versionName} is ready to download", "updates", "update:${state.updateInfo.versionName}", showSystemNotification = false)
                     }
                     is UpdateState.UpToDate -> {
                         _statusNotification.value = "Nexa AI is up to date (v${state.currentVersion})"
@@ -79,6 +90,9 @@ class NexaViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        // Automatically check GitHub Releases whenever Nexa AI starts.
+        // If a newer release exists, the existing update-state collector opens the update dialog.
+        checkForUpdates(manual = false)
     }
 
     fun loadData() {
@@ -100,6 +114,37 @@ class NexaViewModel(application: Application) : AndroidViewModel(application) {
             updateManager.resetState()
         }
         _activeDialog.value = null
+    }
+
+    fun addNotification(
+        title: String,
+        message: String,
+        category: String,
+        dedupeKey: String = "manual:${System.currentTimeMillis()}",
+        showSystemNotification: Boolean = true
+    ) {
+        viewModelScope.launch {
+            val inserted = notificationRepository.add(title, message, category, dedupeKey)
+            if (inserted) {
+                android.util.Log.d("NexaNotifications", "New notification added: $category")
+                if (showSystemNotification && category != "updates") {
+                    val notificationId = dedupeKey.hashCode() and Int.MAX_VALUE
+                    NexaNotificationHelper.show(getApplication(), title, message, notificationId)
+                }
+            }
+        }
+    }
+    fun markNotificationRead(id: Long) {
+        viewModelScope.launch { notificationRepository.markAsRead(id) }
+    }
+    fun markAllNotificationsRead() {
+        viewModelScope.launch { notificationRepository.markAllAsRead() }
+    }
+    fun deleteNotification(id: Long) {
+        viewModelScope.launch { notificationRepository.delete(id) }
+    }
+    fun clearAllNotifications() {
+        viewModelScope.launch { notificationRepository.deleteAll() }
     }
 
     fun clearNotification() {

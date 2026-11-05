@@ -98,15 +98,12 @@ jobs:
             exit 1
           }
 
-          if [ -n "$EXPECTED_CERT_SHA256" ]; then
-            EXPECTED_CERT="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
-            [ "$ACTUAL_CERT" = "$EXPECTED_CERT" ] || {
-              echo 'Signing certificate SHA-256 mismatch'
-              exit 1
-            }
-          else
-            echo 'EXPECTED_CERT_SHA256 is not set. Certificate comparison skipped.'
-          fi
+          test -n "$EXPECTED_CERT_SHA256" || { echo 'Missing EXPECTED_CERT_SHA256 repository secret'; exit 1; }
+          EXPECTED_CERT="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          [ "$ACTUAL_CERT" = "$EXPECTED_CERT" ] || {
+            echo 'Signing certificate SHA-256 mismatch'
+            exit 1
+          }
 
           sha256sum "$APK" | tee "$RUNNER_TEMP/apk-sha256.txt"
 

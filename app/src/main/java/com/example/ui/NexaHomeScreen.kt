@@ -1,10 +1,14 @@
 package com.example.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -40,6 +44,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -48,6 +53,8 @@ import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -87,6 +94,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.BuildConfig
+import com.example.model.UpdateState
+import com.example.service.UpdateNotificationHelper
 import com.example.ui.components.EmojiKeyboardPanel
 import com.example.ui.components.MessageBubble
 import com.example.ui.components.NexaSaturnLogo
@@ -99,6 +108,7 @@ import com.example.ui.dialogs.RecentChatsDialog
 import com.example.ui.dialogs.SecurityDialog
 import com.example.ui.dialogs.SettingsDialog
 import com.example.ui.dialogs.UpdateDialog
+import com.example.ui.dialogs.NotificationCenterDialog
 import com.example.ui.theme.NexaBlack
 import com.example.ui.theme.NexaDarkGreen
 import com.example.ui.theme.NexaGreenBorder
@@ -115,7 +125,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NexaHomeScreen(
     viewModel: NexaViewModel = viewModel(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier, notificationIntentKey: Int = 0
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -132,8 +142,16 @@ fun NexaHomeScreen(
     val memories by viewModel.memories.collectAsState()
     val notification by viewModel.statusNotification.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
+    val notifications by viewModel.notifications.collectAsState()
+    val unreadNotificationCount by viewModel.unreadNotificationCount.collectAsState()
+    LaunchedEffect(notificationIntentKey) {
+        if (notificationIntentKey > 0) {
+            viewModel.openDialog(DialogType.NOTIFICATIONS)
+        }
+    }
 
     var showEmojiPanel by remember { mutableStateOf(false) }
+    var showFirstLaunchPermissionDialog by remember { mutableStateOf(false) }
 
     // Close drawer on Android back press if open
     BackHandler(enabled = drawerState.isOpen) {
@@ -145,6 +163,52 @@ fun NexaHomeScreen(
         notification?.let { msg ->
             snackbarHostState.showSnackbar(msg)
             viewModel.clearNotification()
+        }
+    }
+
+    // Request notification permission only during a genuine fresh installation.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val prefs = context.getSharedPreferences("nexa_first_launch_prefs", 0)
+            val setupDone = prefs.getBoolean("notification_permission_setup_done", false)
+            val permissionGranted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (permissionGranted) {
+                prefs.edit().putBoolean("notification_permission_setup_done", true).apply()
+            } else if (!setupDone) {
+                val isFreshInstall = runCatching {
+                    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+                    info.lastUpdateTime - info.firstInstallTime <= 10_000L
+                }.getOrDefault(false)
+
+                if (isFreshInstall) {
+                    showFirstLaunchPermissionDialog = true
+                } else {
+                    prefs.edit().putBoolean("notification_permission_setup_done", true).apply()
+                }
+            }
+        }
+    }
+
+    // Update notifications never trigger a permission prompt.
+    LaunchedEffect(updateState) {
+        val available = updateState as? UpdateState.Available ?: return@LaunchedEffect
+        val permissionGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+        if (permissionGranted) {
+            UpdateNotificationHelper.showUpdateAvailable(context, available.updateInfo)
         }
     }
 
@@ -445,6 +509,27 @@ fun NexaHomeScreen(
                         }
                     }
 
+                    IconButton(
+                        onClick = { viewModel.openDialog(DialogType.NOTIFICATIONS) },
+                        modifier = Modifier.size(40.dp).testTag("notification_center_btn")
+                    ) {
+                        Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Notifications",
+                                tint = NexaNeonGreen
+                            )
+                            if (unreadNotificationCount > 0) {
+                                Box(
+                                    modifier = Modifier.align(Alignment.TopEnd)
+                                        .padding(top = 5.dp, end = 5.dp)
+                                        .size(9.dp)
+                                        .background(Color(0xFFFF3B30), CircleShape)
+                                        .border(1.dp, Color(0xF0030805), CircleShape)
+                                )
+                            }
+                        }
+                    }
                     // Top Action: New Chat
                     IconButton(
                         onClick = { viewModel.startNewChat() },
@@ -768,12 +853,65 @@ fun NexaHomeScreen(
                 onDismiss = { viewModel.closeDialog() }
             )
         }
+        DialogType.NOTIFICATIONS -> {
+            NotificationCenterDialog(
+                notifications = notifications,
+                onDismiss = { viewModel.closeDialog() },
+                onMarkRead = { viewModel.markNotificationRead(it) },
+                onMarkAllRead = { viewModel.markAllNotificationsRead() },
+                onDelete = { viewModel.deleteNotification(it) },
+                onClearAll = { viewModel.clearAllNotifications() }
+            )
+        }
         null -> {}
+    }
+
+    if (showFirstLaunchPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                context.getSharedPreferences("nexa_first_launch_prefs", 0)
+                    .edit()
+                    .putBoolean("notification_permission_setup_done", true)
+                    .apply()
+                showFirstLaunchPermissionDialog = false
+            },
+            title = { Text("Enable Nexa AI Notifications") },
+            text = {
+                Text(
+                    "Allow notifications to receive important Nexa AI updates " +
+                    "and activity alerts. You can continue using the app if you choose Not now."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    context.getSharedPreferences("nexa_first_launch_prefs", 0)
+                        .edit()
+                        .putBoolean("notification_permission_setup_done", true)
+                        .apply()
+                    showFirstLaunchPermissionDialog = false
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }) {
+                    Text("Allow")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    context.getSharedPreferences("nexa_first_launch_prefs", 0)
+                        .edit()
+                        .putBoolean("notification_permission_setup_done", true)
+                        .apply()
+                    showFirstLaunchPermissionDialog = false
+                }) {
+                    Text("Not now")
+                }
+            }
+        )
     }
 }
 
 @Composable
 private fun DrawerItem(
+
     icon: ImageVector,
     label: String,
     iconTint: Color = NexaTextMuted,
