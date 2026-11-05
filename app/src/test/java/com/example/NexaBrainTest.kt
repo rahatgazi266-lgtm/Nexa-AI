@@ -254,7 +254,7 @@ class NexaBrainTest {
     @Test
     fun testUpdateManagerRepositoryAndUrls() {
         assertEquals("rahatgazi266-lgtm/Nexa-AI", UpdateManager.DEFAULT_REPO)
-        assertEquals("https://github.com/rahatgazi266-lgtm/Nexa-AI/releases/latest/download/Nexa-AI.apk", UpdateManager.DEFAULT_APK_DOWNLOAD_URL)
+        assertEquals("https://github.com/rahatgazi266-lgtm/Nexa-AI/releases/latest/download/app-release.apk", UpdateManager.DEFAULT_APK_DOWNLOAD_URL)
         assertEquals("https://api.github.com/repos/rahatgazi266-lgtm/Nexa-AI/releases/latest", UpdateManager.RELEASES_API_URL)
     }
 }
